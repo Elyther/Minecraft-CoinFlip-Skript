@@ -1,0 +1,255 @@
+options:
+    prefix: &8[&6CoinFlip&8] &7
+    min-bet: 100
+    menu-list: &8&lActive Games
+    menu-spin: &8&lCoinFlip Spinning...
+
+function cf_format(n: number) :: text:
+    if {_n} >= 1000000000000:
+        set {_n} to {_n} / 1000000000000
+        return "%{_n}%T"
+    else if {_n} >= 1000000000:
+        set {_n} to {_n} / 1000000000
+        return "%{_n}%B"
+    else if {_n} >= 1000000:
+        set {_n} to {_n} / 1000000
+        return "%{_n}%M"
+    else if {_n} >= 1000:
+        set {_n} to {_n} / 1000
+        return "%{_n}%K"
+    else:
+        return "%{_n}%"
+
+command /coinflip [<text>]:
+    aliases: /cf
+    trigger:
+        if arg-1 is "menu":
+            execute player command "dm open coinflip_main"
+            
+        else if arg-1 is "bot":
+            set {cf::chat_action::%player%} to "bot"
+            send "{@prefix} &aEnter the bet amount in chat to play against the bot."
+            send "&7(Example: 1000, 1.5k, 2m) &7(Type &ccancel &7to cancel)"
+            
+        else if arg-1 is "pvpcreate":
+            if {cf::amount::%player%} is not set:
+                set {cf::chat_action::%player%} to "pvp_create"
+                send "{@prefix} &aEnter the bet amount in chat to create a game."
+                send "&7(Example: 1000, 1.5k, 2m) &7(Type &ccancel &7to cancel)"
+            else:
+                send "{@prefix} &cYou already have an active game! Cancel it first."
+
+        else if arg-1 is "list":
+            set metadata tag "cf_pvp_list" of player to chest inventory with 6 rows named "{@menu-list}"
+            set {_slot} to 0
+            loop {cf::games::*}:
+                if loop-value is not player:
+                    set {_betFormat} to cf_format({cf::amount::%loop-value%})
+                    set slot {_slot} of metadata tag "cf_pvp_list" of player to loop-value's skull named "&e%loop-value%" with lore "&7Bet: &a%{_betFormat}%$" and "&eClick to join and flip!"
+                    add 1 to {_slot}
+            open (metadata tag "cf_pvp_list" of player) to player
+
+        else if arg-1 is "cancel":
+            if {cf::amount::%player%} is set:
+                add {cf::amount::%player%} to player's balance
+                remove player from {cf::games::*}
+                delete {cf::amount::%player%}
+                send "{@prefix} &aYour game has been cancelled. Your money has been refunded."
+            else:
+                send "{@prefix} &cYou do not have an active game."
+        else:
+            execute player command "dm open coinflip_main"
+
+on inventory click:
+    set {_menu} to uncolored name of event-inventory
+    
+    if {_menu} is uncolored "{@menu-list}":
+        cancel event
+        if event-inventory is not player's inventory:
+            if event-slot is not air:
+                set {_target-name} to uncolored name of event-slot
+                set {_target} to {_target-name} parsed as offline player
+                
+                if {cf::amount::%{_target}%} is set:
+                    set {_bet} to {cf::amount::%{_target}%}
+                    if player's balance >= {_bet}:
+                        remove {_bet} from player's balance
+                        delete {cf::amount::%{_target}%}
+                        remove {_target} from {cf::games::*}
+                        
+                        close player's inventory
+                        cf_startSpin(player, "pvp", {_bet}, {_target})
+                    else:
+                        send "{@prefix} &cYou do not have enough money!"
+                else:
+                    send "{@prefix} &cThis game has already been played or cancelled."
+                    close player's inventory
+
+    else if {_menu} is uncolored "{@menu-spin}":
+        cancel event
+
+on inventory drag:
+    set {_menu} to uncolored name of event-inventory
+    if {_menu} is uncolored "{@menu-list}" or uncolored "{@menu-spin}":
+        cancel event
+
+on chat:
+    if {cf::chat_action::%player%} is set:
+        cancel event
+        set {_msg} to message
+        
+        if {_msg} is "cancel":
+            delete {cf::chat_action::%player%}
+            send "{@prefix} &cThe operation has been cancelled."
+            stop
+
+        set {_mult} to 1
+        if {_msg} contains "t" or "T":
+            set {_mult} to 1000000000000
+            replace all "t" and "T" with "" in {_msg}
+        else if {_msg} contains "b" or "B":
+            set {_mult} to 1000000000
+            replace all "b" and "B" with "" in {_msg}
+        else if {_msg} contains "m" or "M":
+            set {_mult} to 1000000
+            replace all "m" and "M" with "" in {_msg}
+        else if {_msg} contains "k" or "K":
+            set {_mult} to 1000
+            replace all "k" and "K" with "" in {_msg}
+
+        set {_bet} to {_msg} parsed as number
+        if {_bet} is not set:
+            send "{@prefix} &cPlease enter only a number or abbreviation (e.g. 1.5k, 2m)!"
+            stop
+            
+        set {_bet} to {_bet} * {_mult}
+
+        if {_bet} < {@min-bet}:
+            send "{@prefix} &cMinimum bet: &e%cf_format({@min-bet})%$"
+            stop
+
+        if player's balance < {_bet}:
+            send "{@prefix} &cYou do not have enough money!"
+            delete {cf::chat_action::%player%}
+            stop
+
+        if {cf::chat_action::%player%} is "bot":
+            delete {cf::chat_action::%player%}
+            remove {_bet} from player's balance
+            cf_startSpin(player, "bot", {_bet}, player)
+            
+        else if {cf::chat_action::%player%} is "pvp_create":
+            delete {cf::chat_action::%player%}
+            remove {_bet} from player's balance
+            set {cf::amount::%player%} to {_bet}
+            add player to {cf::games::*}
+            send "{@prefix} &aYou successfully created a &e%cf_format({_bet})%$ &agame!"
+            send "{@prefix} &7(To cancel it, use &e/cf cancel &7)"
+            
+            broadcast "{@prefix} &e%player% &7created a CoinFlip worth &a%cf_format({_bet})%$&7! Join with: &e/cf"
+
+on quit:
+    delete {cf::chat_action::%player%}
+
+function cf_startSpin(p: player, type: text, bet: number, target: offline player):
+    set {_gui} to chest inventory with 3 rows named "{@menu-spin}"
+    open {_gui} to {_p}
+    
+    if {_type} is "bot":
+        set {_chance} to a random integer between 1 and 100
+        if {_chance} <= 30:
+            set {_win-chance} to 1
+        else:
+            set {_win-chance} to 2
+    else:
+        set {_win-chance} to a random integer between 1 and 2
+
+    set {_items::*} to empty list
+    loop 50 times:
+        set {_rand} to a random integer between 1 and 2
+        if {_rand} is 1:
+            add skull of {_p} named "&a%{_p}%" to {_items::*}
+        else:
+            if {_type} is "bot":
+                add skeleton skull named "&cBot" to {_items::*}
+            else:
+                add skull of {_target} named "&c%{_target}%" to {_items::*}
+
+    if {_win-chance} is 1:
+        set {_items::29} to skull of {_p} named "&a&l%{_p}% &e&l(WINNER!)"
+    else:
+        if {_type} is "bot":
+            set {_items::29} to skeleton skull named "&c&lBot &e&l(WINNER!)"
+        else:
+            set {_items::29} to skull of {_target} named "&c&l%{_target}% &e&l(WINNER!)"
+
+    set {_shift} to 1
+    set {_speed} to 2
+    
+    loop 25 times:
+        if uncolored name of {_p}'s current inventory is uncolored "{@menu-spin}":
+            
+            if loop-value is 1 or 3 or 5 or 7 or 9 or 11 or 13 or 15 or 17 or 19 or 21 or 23 or 25:
+                set slot (integers between 0 and 3) of {_p}'s current inventory to yellow stained glass pane named " "
+                set slot (integers between 5 and 8) of {_p}'s current inventory to yellow stained glass pane named " "
+                set slot (integers between 18 and 21) of {_p}'s current inventory to orange stained glass pane named " "
+                set slot (integers between 23 and 26) of {_p}'s current inventory to orange stained glass pane named " "
+            else:
+                set slot (integers between 0 and 3) of {_p}'s current inventory to orange stained glass pane named " "
+                set slot (integers between 5 and 8) of {_p}'s current inventory to orange stained glass pane named " "
+                set slot (integers between 18 and 21) of {_p}'s current inventory to yellow stained glass pane named " "
+                set slot (integers between 23 and 26) of {_p}'s current inventory to yellow stained glass pane named " "
+
+            set slot 4 of {_p}'s current inventory to hopper named "&e&l⬇ WINNER ⬇"
+            set slot 22 of {_p}'s current inventory to hopper named "&e&l⬆ WINNER ⬆"
+
+            set {_slot} to 9
+            loop 9 times:
+                set {_idx} to {_shift} + loop-value-2 - 1
+                set slot {_slot} of {_p}'s current inventory to {_items::%{_idx}%}
+                add 1 to {_slot}
+            
+            play sound "block.note_block.click" with volume 1 and pitch 1.8 to {_p}
+            play sound "ui.button.click" with volume 0.6 and pitch 1.2 to {_p}
+        
+        set {_wait} to "%floor({_speed})% ticks" parsed as timespan
+        wait {_wait}
+        add 0.35 to {_speed}
+        add 1 to {_shift}
+
+    wait 10 ticks
+    
+    set {_pool} to {_bet} * 2
+    
+    if {_win-chance} is 1:
+        add {_pool} to {_p}'s balance
+        if uncolored name of {_p}'s current inventory is uncolored "{@menu-spin}":
+            play sound "entity.player.levelup" with volume 1 and pitch 1 to {_p}
+            play sound "entity.firework_rocket.blast" with volume 1 and pitch 1 to {_p}
+            send "{@prefix} &aCongratulations! You won &e%cf_format({_pool})%$&a!" to {_p}
+        
+        if {_type} is "pvp":
+            if {_target} is online:
+                send "{@prefix} &cUnfortunately, you lost the coinflip against &e%{_p}%&c. &e%cf_format({_bet})%$ &cwas lost." to {_target}
+                play sound "entity.villager.no" with volume 1 and pitch 1 to {_target}
+            broadcast "{@prefix} &e%{_p}% &7won &a%cf_format({_pool})%$ &7against &e%{_target}%&7!"
+        else:
+            broadcast "{@prefix} &e%{_p}% &7won &a%cf_format({_pool})%$ &7against the Bot!"
+                
+    else:
+        if uncolored name of {_p}'s current inventory is uncolored "{@menu-spin}":
+            play sound "entity.villager.no" with volume 1 and pitch 1 to {_p}
+            play sound "block.anvil.land" with volume 0.5 and pitch 0.8 to {_p}
+            send "{@prefix} &cUnfortunately, you lost. &e%cf_format({_bet})%$ &cwas lost." to {_p}
+            
+        if {_type} is "pvp":
+            add {_pool} to {_target}'s balance
+            if {_target} is online:
+                send "{@prefix} &aCongratulations! You won against &e%{_p}%&a! &e%cf_format({_pool})%$ &ahas been added to your balance." to {_target}
+                play sound "entity.player.levelup" with volume 1 and pitch 1 to {_target}
+            broadcast "{@prefix} &e%{_target}% &7won &a%cf_format({_pool})%$ &7against &e%{_p}%&7!"
+        else:
+            broadcast "{@prefix} &e%{_p}% &7lost &c%cf_format({_bet})%$ &7against the Bot!"
+
+    wait 2 seconds
+    close {_p}'s inventory
