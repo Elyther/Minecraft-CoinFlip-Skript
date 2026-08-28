@@ -1,1 +1,2 @@
 # Minecraft-CoinFlip-Skript
+Hello everyone, I'm Elyther, in this code anyone can play Coinflip, if there are few people on your server, the bot feature is available, just the Skript plugin is enough for the code
